@@ -3,44 +3,43 @@ using Cars2Json.Models;
 using CefSharp;
 using CefSharp.OffScreen;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System.Collections.Specialized;
 using System.Diagnostics;
 
 var carComUrl = "https://www.cars.com/";
 
-Console.WriteLine("This example application will load {0}, take datas and a screenshot, and save image and json file to your desktop.", carComUrl);
+Console.WriteLine("This example application will load {0}, take datas and save json file to your desktop.", carComUrl);
 Console.WriteLine("You may see Chromium fatal error output, please wait...");
 Console.WriteLine();
 var basePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
 var cefSettings = new CefSettings()
 {
     //By default CefSharp will use an in-memory cache, you need to specify a Cache Folder to persist data
-    CachePath = Path.Combine(basePath, "CefSharp\\Cache"),
+    CachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CefSharp\\Cache"),
+    LogSeverity = LogSeverity.Disable,
+    UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
+    ChromeRuntime= false,
     JavascriptFlags = "--trace-opt",
     IgnoreCertificateErrors = true,
-    CookieableSchemesExcludeDefaults = true,
-    Locale = "en-US",
-    MultiThreadedMessageLoop = true,
-    PersistUserPreferences = true,
-    PersistSessionCookies = true,
-    WindowlessRenderingEnabled = true,
-    ChromeRuntime = false,
-    LogSeverity = LogSeverity.Error,
-
-    PackLoadingDisabled = false,
-
-
+    CookieableSchemesExcludeDefaults = false,
+    PersistSessionCookies = false,
 };
+
+#if ANYCPU
+            //Only required for PlatformTarget of AnyCPU
+            CefRuntime.SubscribeAnyCpuAssemblyResolver();
+#endif
 
 //Perform dependency check to make sure all relevant resources are in our output directory.
 Cef.Initialize(cefSettings, performDependencyCheck: true, browserProcessHandler: null);
- 
+
 
 try
 {
 
     await Login();
-
 
     var criteriaList = new List<SearchCriterias>();
 
@@ -49,10 +48,10 @@ try
     Console.WriteLine("Search Tesla Model S. Get page 1");
 
     var newCriteria = await SearchWithNewCriterias(page: 1, makes: "tesla", model: "tesla-model_s", stockType: "used", distance: "all", maxPrice: 100000, zipCode: "94596");
-    //criteriaList.Add(newCriteria);
+    criteriaList.Add(newCriteria);
 
-    //Console.WriteLine("Search Tesla Model S. Get page 2");
-    //newCriteria = await SearchWithNewCriterias(page: 2, makes: "tesla", model: "tesla-model_s", stockType: "used", distance: "all", maxPrice: 100000, zipCode: "94596");
+    Console.WriteLine("Search Tesla Model S. Get page 2");
+    newCriteria = await SearchWithNewCriterias(page: 2, makes: "tesla", model: "tesla-model_s", stockType: "used", distance: "all", maxPrice: 100000, zipCode: "94596");
     if (newCriteria.Cars.Count > 0)
     {
         Console.WriteLine("Get first car details ({0})", newCriteria.Cars[0].Title);
@@ -86,6 +85,7 @@ try
 
 
 
+
     Console.WriteLine("Save json file");
     string json = JsonConvert.SerializeObject(criteriaList);
     var jsonPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "tesla-cars.json");
@@ -97,39 +97,20 @@ try
         UseShellExecute = true
     });
 
-    // Wait for the screenshot to be taken.
-    //var image = await browser.CaptureScreenshotAsync();
-    //// File path to save our screenshot e.g. C:\Users\{username}\Desktop\CefSharp screenshot.png
-    //var screenshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "CefSharp screenshot.png");
-
-    //Console.WriteLine();
-    //Console.WriteLine("Screenshot ready. Saving to {0}", screenshotPath);
-
-    //var bitmapAsByteArray = image;
-
-    //// Save the Bitmap to the path.
-    //File.WriteAllBytes(screenshotPath, bitmapAsByteArray);
-
-    //Console.WriteLine("Screenshot saved.  Launching your default image viewer...");
-
-    //// Tell Windows to launch the saved image.
-    //Process.Start(new ProcessStartInfo(screenshotPath)
-    //{
-    //    // UseShellExecute is false by default on .NET Core.
-    //    UseShellExecute = true
-    //});
-
+    
     Console.WriteLine("Json file launched.  Press any key to exit.");
+
+
 
 
     // We have to wait for something, otherwise the process will exit too soon.
     Console.ReadKey();
 
+
     // Clean up Chromium objects. You need to call this in your application otherwise
     // you will get a crash when closing.
     //The ChromiumWebBrowser instance will be disposed
-    Cef.Shutdown();
-
+    //Cef.Shutdown();
 }
 catch (Exception)
 {
@@ -170,11 +151,11 @@ async Task Login()
         await setPassword;
 
         Console.WriteLine("User name and password set.");
- 
+
         await clickLogin;
 
         Console.WriteLine("Login clicked.");
-         
+
     }
 
 
@@ -223,7 +204,7 @@ async Task<SearchCriterias> SearchWithNewCriterias(int page = 1, int pageSize = 
     };
 
     // Create the offscreen Chromium browser.
-    using (var browser = new ChromiumWebBrowser(carComUrl))
+    using (var browser = new ChromiumWebBrowser(GetUrl(newCriteria)))
     {
 
         var initialLoadResponse = await browser.WaitForInitialLoadAsync();
@@ -231,10 +212,8 @@ async Task<SearchCriterias> SearchWithNewCriterias(int page = 1, int pageSize = 
         if (!initialLoadResponse.Success)
         {
             throw new Exception(string.Format("Page load failed with ErrorCode:{0}, HttpStatusCode:{1}", initialLoadResponse.ErrorCode, initialLoadResponse.HttpStatusCode));
-        } 
+        }
 
-        await browser.LoadUrlAsync(GetUrl(newCriteria));
- 
         var rawDataReq = await browser.EvaluateScriptAsync("document.querySelector('div[class=\"sds-page-section listings-page\"]').getAttribute(\"data-site-activity\")");
         newCriteria.RawData = JsonConvert.DeserializeObject(rawDataReq.Result.ToString());
         var dataCountReq = await browser.EvaluateScriptAsync("document.querySelectorAll('div[data-tracking-type=\"srp-vehicle-card\"]').length");
@@ -336,12 +315,16 @@ async Task<Car> GetCarDetailsAsync(Car car)
         car.SellersNotes = rawDataReq?.Result?.ToString();
 
         rawDataReq = await browser.EvaluateScriptAsync("document.querySelector('cars-price-history').getAttribute(\"price-history-data\")");
-        var priceHistoryRawData = JsonConvert.DeserializeObject<dynamic>(rawDataReq.Result.ToString());
+        dynamic priceHistoryRawData = JsonConvert.DeserializeObject<dynamic>(rawDataReq.Result.ToString());
 
-        foreach (var item in (List<dynamic>)priceHistoryRawData.price_history)
+        JArray jsonResponse = JArray.Parse(priceHistoryRawData.price_history.ToString());
+
+        foreach (dynamic item in jsonResponse.ToArray())
         {
             car.PriceHistories.Add(new PriceHistory { Date = item.inserted_at, Price = item.list_price });
+
         }
+
         car.PriceGoodThreshold = priceHistoryRawData.good_threshold;
         car.GreatThreshold = priceHistoryRawData.great_threshold;
         car.PredictedPrice = priceHistoryRawData.predicted_price;
@@ -350,7 +333,7 @@ async Task<Car> GetCarDetailsAsync(Car car)
     }
 
 
-  
+
 
 
     return car;
